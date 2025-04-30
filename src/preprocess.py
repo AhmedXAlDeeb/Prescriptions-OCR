@@ -195,7 +195,9 @@ class HandwrittenBoxExtractor:
         self.binary = None
         self.dilated = None
         self.final_boxes = []
-        self.handwritten_boxes = []
+        
+    def get_boxes(self):
+        return self.final_boxes
 
     def preprocess(self, visualize):
         # Step 1: Binary inverse thresholding
@@ -287,4 +289,4 @@ if __name__ == "__main__":
     blue_image = extractor.get_blue_cropped_image()
 
     box_extractor = HandwrittenBoxExtractor(image, blue_image)
-    box_extractor.run(visualize=False)
+    box_extractor.run(visualize=True)
