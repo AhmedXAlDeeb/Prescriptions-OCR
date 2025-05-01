@@ -96,10 +96,9 @@ class HandwrittenExtractor:
         blurred = cv2.blur(blue_emphasized, (3, 3))  # kernel size can be tuned
 
         # Step 2: Normalize blurred image
-        normalized_blur = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
 
         # Step 3: Apply threshold to highlight regions with strong blue presence
-        _, binary_mask = cv2.threshold(normalized_blur, 150, 255, cv2.THRESH_BINARY)  # threshold value can be tuned
+        _, binary_mask = cv2.threshold(blurred, 25, 255, cv2.THRESH_BINARY)  # threshold value can be tuned
         return binary_mask
 
     def _morphological_cleaning(self, binary_mask):
@@ -137,9 +136,12 @@ class HandwrittenExtractor:
 
         return cleaned_mask
 
+
     def _process(self):
         norm = self._normalize_intensity(self.original)
+
         blue = self._emphasize_blue(norm)
+  
         # blue_emphasized = cv2.GaussianBlur(blue, (5, 5), 0)
         mask = self._generate_mask(blue)
         clean = self._morphological_cleaning(mask)
@@ -230,14 +232,15 @@ class HandwrittenBoxExtractor:
             self._show_image(opened, "After Morphological Opening", cmap='gray')
 
         # Step 3: Dilation to group characters
-        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
         self.dilated = cv2.dilate(opened, kernel_dilate, iterations=3)
         if visualize:
             self._show_image(self.dilated, "After Dilation", cmap='gray')
+        self.dilated = cv2.morphologyEx(self.dilated, cv2.MORPH_CLOSE, kernel_dilate)
 
     def find_and_filter_boxes(self, visualize):
         contours, _ = cv2.findContours(self.dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        boxes = [cv2.boundingRect(c) for c in contours if cv2.contourArea(c) > 300]
+        boxes = [cv2.boundingRect(c) for c in contours if cv2.contourArea(c) > 200]
         
         self.final_boxes = self.non_max_suppression_fast(boxes)
 
@@ -250,8 +253,10 @@ class HandwrittenBoxExtractor:
             merged = False
             for i, (mx, my, mw, mh) in enumerate(merged_boxes):
                 # If boxes are on the same line (y overlap) and close horizontally
-                same_line = abs(my - y) < h // 2
-                close_x = 0 < x - (mx + mw) < 20  # within 20 pixels to the right
+                center_y1 = y + h // 2
+                center_y2 = my + mh // 2
+                same_line = abs(center_y1 - center_y2) < max(h, mh) * 0.5 
+                close_x = 0 < x + (mx + mw) < 100  # within 20 pixels to the right
                 if same_line and close_x:
                     # merge: extend width
                     new_x = mx
@@ -380,7 +385,9 @@ class HandwrittenBoxExtractor:
 if __name__ == "__main__":
     # path = '/Users/mistaluai/Documents/Github Repos/Prescriptions-OCR/data/test/Beauty_prescription_1.jpg'
     # path = '/Users/mistaluai/Documents/Github Repos/Prescriptions-OCR/data/test/prescription_opth_203.jpg'
-    path ='D:\\telemed\Machathon_Prescription_Digtalization_6.00\Machathon_Prescription_Digtalization_6.00\Train_Data_Phase1\Beauty_prescription_100.jpg'
+    path =r'D:\telemed\Machathon_Prescription_Digtalization_6.00\Machathon_Prescription_Digtalization_6.00\Train_Data_Phase1\Beauty_prescription_48.jpg'
+    # path = 'D:/telemed/Machathon_Prescription_Digtalization_6.00/Machathon_Prescription_Digtalization_6.00/Train_Data_Phase1/Neurology_prescription_131.jpg'
+    
     extractor = HandwrittenExtractor(path)
     # extractor.show_debug_plot()
 
