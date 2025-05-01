@@ -56,6 +56,23 @@ class HandwrittenExtractor:
         b, g, r = cv2.split(image)
         return cv2.subtract(b, cv2.addWeighted(r, 0.5, g, 0.5, 0))
 
+    def _emphasize_blue_output(self, image, threshold=10):
+        # Step 1: Split channels
+        normalized = cv2.normalize(image, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+
+        b, g, r = cv2.split(image)
+
+        # Step 2: Emphasize blue by subtracting weighted red and green
+        blue_emphasis = cv2.subtract(b, cv2.addWeighted(r, 0.5, g, 0.5, 0))
+
+        # Step 3: Normalize to 0-255
+        normalized = cv2.normalize(blue_emphasis, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+
+        # Step 4: Threshold to remove low values (set below-threshold pixels to 0)
+        _, cleaned = cv2.threshold(normalized, threshold, 255, cv2.THRESH_TOZERO)
+
+        return cleaned.astype(np.uint8)
+        
     def _crop_handwriting(self, mask):
         y_coords, x_coords = np.where(mask == 255)
         if len(x_coords) > 0:
@@ -91,7 +108,7 @@ class HandwrittenExtractor:
         removes regions whose local stats deviate from global handwriting patterns.
         """
         h, w = binary_mask.shape
-        window_size = 50  # can be tuned
+        window_size = 30  # can be tuned
         stride = 10  # controls overlap
         threshold_factor = 3  # how strict the filtering is
 
@@ -150,17 +167,17 @@ class HandwrittenExtractor:
         plt.axis('off')
 
         plt.subplot(2, 3, 3)
-        plt.imshow(p["binary_mask"], cmap='blue_image')
+        plt.imshow(p["binary_mask"], cmap='gray')
         plt.title(f'Mask ')
         plt.axis('off')
 
         plt.subplot(2, 3, 4)
-        plt.imshow(p["blue_emphasized"], cmap='blue_image')
+        plt.imshow(p["blue_emphasized"], cmap='gray')
         plt.title('Blue-Emphasized')
         plt.axis('off')
 
         plt.subplot(2, 3, 5)
-        plt.imshow(p["clean_mask"], cmap='blue_image')
+        plt.imshow(p["clean_mask"], cmap='gray')
         plt.title(f'Mask ')
         plt.axis('off')
 
@@ -179,7 +196,7 @@ class HandwrittenExtractor:
         return self.cropped
 
     def get_blue_cropped_image(self):
-        return self._emphasize_blue(self.cropped)
+        return self._emphasize_blue_output(self.cropped)
 
     def get_clean_mask(self):
         return self.mask
@@ -221,10 +238,36 @@ class HandwrittenBoxExtractor:
     def find_and_filter_boxes(self, visualize):
         contours, _ = cv2.findContours(self.dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         boxes = [cv2.boundingRect(c) for c in contours if cv2.contourArea(c) > 300]
+        
         self.final_boxes = self.non_max_suppression_fast(boxes)
+
+        # Step: Merge small, horizontally close boxes
+        merged_boxes = []
+        self.final_boxes = self.final_boxes[self.final_boxes[:, 1].argsort()]
+        
+        for box in self.final_boxes:
+            x, y, w, h = box
+            merged = False
+            for i, (mx, my, mw, mh) in enumerate(merged_boxes):
+                # If boxes are on the same line (y overlap) and close horizontally
+                same_line = abs(my - y) < h // 2
+                close_x = 0 < x - (mx + mw) < 20  # within 20 pixels to the right
+                if same_line and close_x:
+                    # merge: extend width
+                    new_x = mx
+                    new_y = min(my, y)
+                    new_w = max(mx + mw, x + w) - new_x
+                    new_h = max(my + mh, y + h) - new_y
+                    merged_boxes[i] = (new_x, new_y, new_w, new_h)
+                    merged = True
+                    break
+            if not merged:
+                merged_boxes.append(box)
+
+        self.final_boxes = merged_boxes
+
         if visualize:
             self.visualize_boxes(self.final_boxes, title="Refined Word Bounding Boxes", color=(0, 255, 0))
-
     def non_max_suppression_fast(self, boxes, overlapThresh=0.3):
         if len(boxes) == 0:
             return []
@@ -271,7 +314,7 @@ class HandwrittenBoxExtractor:
       Returns:
           np.ndarray: Image with all words stitched in one horizontal line (or stacked by lines if desired).
       """
-      if not boxes.any():
+      if not len(boxes):
           return np.zeros((target_height or 64, 64), dtype=np.uint8)
 
       # Sort boxes by y
@@ -337,13 +380,14 @@ class HandwrittenBoxExtractor:
 if __name__ == "__main__":
     # path = '/Users/mistaluai/Documents/Github Repos/Prescriptions-OCR/data/test/Beauty_prescription_1.jpg'
     # path = '/Users/mistaluai/Documents/Github Repos/Prescriptions-OCR/data/test/prescription_opth_203.jpg'
-    path ='D:\\telemed\Machathon_Prescription_Digtalization_6.00\Machathon_Prescription_Digtalization_6.00\Test_Data_Phase2\Dental_prescription_684.jpg'
+    path ='D:\\telemed\Machathon_Prescription_Digtalization_6.00\Machathon_Prescription_Digtalization_6.00\Train_Data_Phase1\Beauty_prescription_100.jpg'
     extractor = HandwrittenExtractor(path)
     # extractor.show_debug_plot()
 
     cropped = extractor.get_cropped_image()
-    blue_cropped = extractor.get_blue_cropped_image()
+    extractor.show_debug_plot()
 
+    blue_cropped = extractor.get_blue_cropped_image()
     box_extractor = HandwrittenBoxExtractor(cropped, blue_cropped)
     box_extractor.preprocess(visualize=True)
     box_extractor.find_and_filter_boxes(visualize=False)
