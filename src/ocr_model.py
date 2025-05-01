@@ -6,7 +6,7 @@ from PIL import Image
 from torch import nn
 from transformers import TrOCRProcessor, AutoTokenizer, VisionEncoderDecoderModel
 
-
+from preprocess import HandwrittenExtractor
 class HandwrittenTextExtractor:
     def __init__(self, vision_model_path="microsoft/trocr-base-stage1", tokenizer_model="aubmindlab/bert-base-arabertv2", device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -35,6 +35,7 @@ class HandwrittenTextExtractor:
         self.model.config.length_penalty = 2.0
         self.model.config.num_beams = 8
 
+    # need to be updateed to extract line handwritten text
     def predict_text_from_image(self, image_path):
         cropper = HandwrittenExtractor(image_path)
         cropped_img = cropper.get_cropped()

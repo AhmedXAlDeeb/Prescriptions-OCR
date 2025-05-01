@@ -213,7 +213,7 @@ class HandwrittenBoxExtractor:
             self._show_image(opened, "After Morphological Opening", cmap='gray')
 
         # Step 3: Dilation to group characters
-        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 10))
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))
         self.dilated = cv2.dilate(opened, kernel_dilate, iterations=3)
         if visualize:
             self._show_image(self.dilated, "After Dilation", cmap='gray')
@@ -256,6 +256,62 @@ class HandwrittenBoxExtractor:
             idxs = np.delete(idxs, np.concatenate(([len(idxs) - 1], np.where(overlap > overlapThresh)[0])))
 
         return boxes[pick].astype("int")
+    def stitch_words_in_line(self, original_image, boxes, padding=10, target_height=None, y_threshold=50):
+      """
+      Crop words from the image using bounding boxes, group by lines using y-value tolerance, 
+      resize to uniform height, and concatenate them horizontally.
+      
+      Args:
+          original_image (np.ndarray): The cropped handwriting image.
+          boxes (list): List of (x, y, w, h) tuples for bounding boxes.
+          padding (int): Horizontal padding between words.
+          target_height (int): Height to resize all words to (optional).
+          y_threshold (int): Tolerance to group words on the same line.
+          
+      Returns:
+          np.ndarray: Image with all words stitched in one horizontal line (or stacked by lines if desired).
+      """
+      if not boxes.any():
+          return np.zeros((target_height or 64, 64), dtype=np.uint8)
+
+      # Sort boxes by y
+      boxes = sorted(boxes, key=lambda b: b[1])
+
+      # Group boxes into lines
+      lines = []
+      current_line = [boxes[0]]
+      current_y = boxes[0][1]
+
+      for box in boxes[1:]:
+          if abs(box[1] - current_y) <= y_threshold:
+              current_line.append(box)
+          else:
+              lines.append(current_line)
+              current_line = [box]
+              current_y = box[1]
+      lines.append(current_line)  # Add the last line
+
+      word_images = []
+
+      for line_boxes in lines:
+          # Sort words in the line by x (left to right)
+          line_boxes = sorted(line_boxes, key=lambda b: b[0])
+
+          for (x, y, w, h) in line_boxes:
+              word_crop = original_image[y:y+h, x:x+w]
+              if target_height is not None:
+                  scale = target_height / word_crop.shape[0]
+                  new_w = int(word_crop.shape[1] * scale)
+                  word_crop = cv2.resize(word_crop, (new_w, target_height))
+              word_images.append(word_crop)
+
+      # Stitch word images horizontally with padding
+      stitched_image = word_images[0]
+      for word in word_images[1:]:
+          spacer = np.ones((stitched_image.shape[0], padding, 3), dtype=np.uint8) * 255
+          stitched_image = np.hstack((stitched_image, spacer, word))
+
+      return stitched_image
 
     def visualize_boxes(self, boxes, title="Bounding Boxes", color=(0, 255, 0)):
         img_copy = self.original_image.copy()
@@ -281,12 +337,24 @@ class HandwrittenBoxExtractor:
 if __name__ == "__main__":
     # path = '/Users/mistaluai/Documents/Github Repos/Prescriptions-OCR/data/test/Beauty_prescription_1.jpg'
     # path = '/Users/mistaluai/Documents/Github Repos/Prescriptions-OCR/data/test/prescription_opth_203.jpg'
-    path = '/Users/mistaluai/Documents/Github Repos/Prescriptions-OCR/data/test/prescription_opth_183.jpg'
+    path ='D:\\telemed\Machathon_Prescription_Digtalization_6.00\Machathon_Prescription_Digtalization_6.00\Test_Data_Phase2\Dental_prescription_684.jpg'
     extractor = HandwrittenExtractor(path)
     # extractor.show_debug_plot()
 
-    image = extractor.get_cropped_image()
-    blue_image = extractor.get_blue_cropped_image()
+    cropped = extractor.get_cropped_image()
+    blue_cropped = extractor.get_blue_cropped_image()
 
-    box_extractor = HandwrittenBoxExtractor(image, blue_image)
-    box_extractor.run(visualize=True)
+    box_extractor = HandwrittenBoxExtractor(cropped, blue_cropped)
+    box_extractor.preprocess(visualize=True)
+    box_extractor.find_and_filter_boxes(visualize=False)
+    boxes = box_extractor.get_boxes()
+
+    stitched_line_img = box_extractor.stitch_words_in_line(cropped, boxes, target_height=64)
+    
+    plt.imshow(cv2.cvtColor(stitched_line_img, cv2.COLOR_BGR2RGB))
+    plt.figure(figsize=(10, 4))
+    plt.imshow(cv2.cvtColor(stitched_line_img, cv2.COLOR_BGR2RGB))
+    plt.title("Stitched Line Image")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
